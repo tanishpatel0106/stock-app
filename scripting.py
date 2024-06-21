@@ -1,0 +1,157 @@
+import pandas as pd
+from datetime import timedelta
+
+# Define the script for which data will be processed
+script = 'ADANIENT'
+
+# Load the daily, weekly, and monthly datasets
+daily_data = pd.read_csv(f'/home/tanishpatel01/Documents/Backup_Tanish/Stock_Market_Data/Data_Visualisations/indicators_processed/{script}_daily_indicators_processed.csv')
+weekly_data = pd.read_csv(f'/home/tanishpatel01/Documents/Backup_Tanish/Stock_Market_Data/Data_Visualisations/indicators_processed/{script}_weekly_indicators_processed.csv')
+monthly_data = pd.read_csv(f'/home/tanishpatel01/Documents/Backup_Tanish/Stock_Market_Data/Data_Visualisations/indicators_processed/{script}_monthly_indicators_processed.csv')
+
+# Helper function to get the previous week's data based on a given date
+def get_previous_week_data(date, weekly_data):
+    """
+    Retrieves the previous week's data based on the given date.
+
+    Parameters:
+    date (datetime): The reference date.
+    weekly_data (DataFrame): The weekly data DataFrame.
+
+    Returns:
+    DataFrame: The previous week's data row.
+    """
+    start_of_week = date - timedelta(days=date.weekday())
+    previous_week_start = start_of_week - timedelta(weeks=1)
+    return weekly_data[weekly_data['Date'] == previous_week_start.strftime('%Y-%m-%d')]
+
+# Helper function to get the corresponding month's data based on a given date
+def get_corresponding_month_data(date, monthly_data):
+    """
+    Retrieves the corresponding month's data based on the given date.
+
+    Parameters:
+    date (datetime): The reference date.
+    monthly_data (DataFrame): The monthly data DataFrame.
+
+    Returns:
+    DataFrame: The corresponding month's data row.
+    """
+    start_of_month = date.replace(day=1)
+    return monthly_data[monthly_data['Date'] == start_of_month.strftime('%Y-%m-%d')]
+
+# Helper function to check RSI trends based on given conditions
+def check_rsi_trend(weekly_data, start_date, end_date, condition):
+    """
+    Checks the RSI trend over a specified period based on a condition.
+
+    Parameters:
+    weekly_data (DataFrame): The weekly data DataFrame.
+    start_date (datetime): The start date of the period.
+    end_date (datetime): The end date of the period.
+    condition (str): The condition to check ('increasing_under_40', 'increasing_50_to_80', 'decreasing_above_70').
+
+    Returns:
+    bool: True if the condition is met, False otherwise.
+    """
+    weekly_data_filtered = weekly_data[(weekly_data['Date'] >= start_date.strftime('%Y-%m-%d')) & 
+                                       (weekly_data['Date'] <= end_date.strftime('%Y-%m-%d'))]
+    if weekly_data_filtered.empty or len(weekly_data_filtered) < 6:
+        return False
+    rsi_values = weekly_data_filtered['RSI']
+    
+    if condition == 'increasing_under_40':
+        return all(rsi < 40 for rsi in rsi_values[:-1]) and rsi_values.iloc[-1] > 30 and all(x < y for x, y in zip(rsi_values, rsi_values[1:]))
+    elif condition == 'increasing_50_to_80':
+        return all(50 <= rsi <= 80 for rsi in rsi_values) and all(x < y for x, y in zip(rsi_values, rsi_values[1:]))
+    elif condition == 'decreasing_above_70':
+        return all(rsi > 70 for rsi in rsi_values) and all(x > y for x, y in zip(rsi_values, rsi_values[1:]))
+    else:
+        return False
+
+# Main function to calculate buy and sell tags
+def calculate_buy_sell_tags(daily_data, weekly_data, monthly_data):
+    """
+    Calculates buy and sell tags based on the provided data.
+
+    Parameters:
+    daily_data (DataFrame): The daily data DataFrame.
+    weekly_data (DataFrame): The weekly data DataFrame.
+    monthly_data (DataFrame): The monthly data DataFrame.
+
+    Returns:
+    tuple: Two lists containing buy and sell tags respectively.
+    """
+    buy_results = []
+    sell_results = []
+
+    for index, row in daily_data.iterrows():
+        date = pd.to_datetime(row['Date'])
+        weekly_row = get_previous_week_data(date, weekly_data)
+        monthly_row = get_corresponding_month_data(date, monthly_data)
+
+        if weekly_row.empty or monthly_row.empty:
+            buy_results.append((row['Date'], 0))
+            sell_results.append((row['Date'], 0))
+            continue
+
+        # Extract necessary indicators from the data
+        choppiness_index = monthly_row['Choppiness_Index'].iloc[0]
+        supertrend = monthly_row['SuperTrend'].iloc[0]
+        current_price = (row['Open'] + row['Close']) / 2
+        sma_20 = monthly_row['SMA_20'].iloc[0]
+        vwsma_200 = row['VWSMA_200']
+        vwema_20 = row['VWEMA_20']
+        vwema_50 = row['VWEMA_50']
+        macd = weekly_row['MACD'].iloc[0]
+        macd_signal = weekly_row['MACD_Signal'].iloc[0]
+        rsi_weekly = weekly_row['RSI'].iloc[0]
+
+        # Buy Logic
+        if choppiness_index < 38.2:
+            if supertrend > current_price:
+                buy_results.append((row['Date'], 0))
+            elif current_price > sma_20 and current_price > vwsma_200 and vwema_20 > vwema_50 and vwema_50 > vwsma_200:
+                if macd > 0 and macd_signal > 0 and macd >= macd_signal:
+                    if check_rsi_trend(weekly_data, date - timedelta(weeks=6), date, 'increasing_50_to_80'):
+                        buy_results.append((row['Date'], 1))
+                    else:
+                        buy_results.append((row['Date'], 0))
+                else:
+                    buy_results.append((row['Date'], 0))
+            else:
+                buy_results.append((row['Date'], 0))
+        elif choppiness_index > 61.8:
+            if supertrend > current_price:
+                buy_results.append((row['Date'], 0))
+            elif current_price > sma_20 and current_price > vwsma_200 and vwema_20 > vwema_50 and vwema_50 > vwsma_200:
+                if check_rsi_trend(weekly_data, date - timedelta(weeks=6), date, 'increasing_under_40'):
+                    buy_results.append((row['Date'], 1))
+                else:
+                    buy_results.append((row['Date'], 0))
+            else:
+                buy_results.append((row['Date'], 0))
+        else:
+            buy_results.append((row['Date'], 0))
+
+        # Sell Logic
+        if check_rsi_trend(weekly_data, date - timedelta(weeks=6), date, 'decreasing_above_70'):
+            if macd < macd_signal or current_price < sma_20 or current_price < vwsma_200 or vwema_20 < 0.95 * vwema_50:
+                sell_results.append((row['Date'], 1))
+            else:
+                sell_results.append((row['Date'], 0))
+        elif current_price < sma_20 or current_price < vwsma_200:
+            sell_results.append((row['Date'], 1))
+        else:
+            sell_results.append((row['Date'], 0))
+
+    return buy_results, sell_results
+
+# Calculate buy and sell tags using the main function
+buy_results, sell_results = calculate_buy_sell_tags(daily_data, weekly_data, monthly_data)
+
+# Convert the results to DataFrames and save to CSV
+buy_df = pd.DataFrame(buy_results, columns=['Date', 'Buy_Tag'])
+sell_df = pd.DataFrame(sell_results, columns=['Date', 'Sell_Tag'])
+result_df = pd.merge(buy_df, sell_df, on='Date')
+result_df.to_csv(f'{script}_updated_daily_data.csv', index=False)

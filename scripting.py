@@ -2,12 +2,12 @@ import pandas as pd
 from datetime import timedelta
 
 # Define the script for which data will be processed
-script = 'ADANIENT'
+script = 'WIPRO'
 
 # Load the daily, weekly, and monthly datasets
-daily_data = pd.read_csv(f'/home/tanishpatel01/Documents/Backup_Tanish/Stock_Market_Data/Data_Visualisations/indicators_processed/{script}_daily_indicators_processed.csv')
-weekly_data = pd.read_csv(f'/home/tanishpatel01/Documents/Backup_Tanish/Stock_Market_Data/Data_Visualisations/indicators_processed/{script}_weekly_indicators_processed.csv')
-monthly_data = pd.read_csv(f'/home/tanishpatel01/Documents/Backup_Tanish/Stock_Market_Data/Data_Visualisations/indicators_processed/{script}_monthly_indicators_processed.csv')
+daily_data = pd.read_csv(f'indicators_processed/{script}_daily_indicators_processed.csv')
+weekly_data = pd.read_csv(f'indicators_processed/{script}_weekly_indicators_processed.csv')
+monthly_data = pd.read_csv(f'indicators_processed/{script}_monthly_indicators_processed.csv')
 
 # Helper function to get the previous week's data based on a given date
 def get_previous_week_data(date, weekly_data):
@@ -155,3 +155,33 @@ buy_df = pd.DataFrame(buy_results, columns=['Date', 'Buy_Tag'])
 sell_df = pd.DataFrame(sell_results, columns=['Date', 'Sell_Tag'])
 result_df = pd.merge(buy_df, sell_df, on='Date')
 result_df.to_csv(f'{script}_updated_daily_data.csv', index=False)
+
+# Function to generate transactions and calculate returns
+def generate_transactions(daily_data, result_df):
+    transactions = []
+    buy_dates = []
+    buy_prices = []
+
+    for index, row in result_df.iterrows():
+        if row['Buy_Tag'] == 1:
+            buy_date = row['Date']
+            buy_row = daily_data[daily_data['Date'] == buy_date].iloc[0]
+            buy_price = (buy_row['Open'] + buy_row['Close']) / 2
+            buy_dates.append(buy_date)
+            buy_prices.append(buy_price)
+        elif row['Sell_Tag'] == 1:
+            sell_date = row['Date']
+            sell_row = daily_data[daily_data['Date'] == sell_date].iloc[0]
+            sell_price = (sell_row['Open'] + sell_row['Close']) / 2
+            for buy_date, buy_price in zip(buy_dates, buy_prices):
+                transaction_return = sell_price - buy_price
+                transactions.append((script, buy_date, sell_date, transaction_return))
+
+    return pd.DataFrame(transactions, columns=['Script', 'Buy_Date', 'Sell_Date', 'Return'])
+
+# Generate transactions and calculate returns
+transactions_df = generate_transactions(daily_data, result_df)
+
+
+# Save the transactions to CSV
+transactions_df.to_csv(f'{script}_transactions.csv', index=False)
